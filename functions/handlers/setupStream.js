@@ -1,76 +1,25 @@
 const axios = require("axios");
 
-/**
- * Real-Debrid API token.
- * ATENÇÃO: Nunca deixe tokens sensíveis hardcoded em produção.
- */
 const REAL_DEBRID_TOKEN =
   "2RHUYGEFBFKUNIKQSUDID2NUIG4MDBOWRD2AFQL3Y6ZOVISI7OSQ";
-const streamUrlCache = new Map();
 
 /**
- * Handler para configurar e armazenar em cache o link de stream a partir de um torrent via Real-Debrid.
- *
- * @param {import('express').Request} req - Requisição HTTP do Express.
- * @param {import('express').Response} res - Resposta HTTP do Express.
- * @returns {Promise<void>}
+ * Handler Express para preparar o link Real-Debrid e retornar o link direto.
+ * Endpoint: /api/stream?magnet=...
  */
-async function setupStreamHandler(req, res) {
-  const { type, imdbId } = req.params;
-  const { season, episode } = req.query;
-  const cacheKey = `${imdbId}-S${season}-E${episode}`;
-
-  console.log(`[SETUP] Pedido para preparar: ${type} ${cacheKey}`);
-
-  if (streamUrlCache.has(cacheKey)) {
-    console.log(`[SETUP] Link encontrado na cache para ${cacheKey}.`);
-    return res.json({ success: true, streamPath: `/stream/${cacheKey}` });
-  }
-
-  try {
-    const { data: torrentsData } = await axios.get(
-      `https://torrentio.strem.fun/stream/${type}/${imdbId}.json`
-    );
-
-    let availableStreams =
-      torrentsData.streams?.filter((s) => s.infoHash) || [];
-
-    if (season && episode) {
-      const seasonNum = parseInt(season, 10);
-      const episodeNum = parseInt(episode, 10);
-      const patterns = [
-        new RegExp(`S0?${seasonNum}E0?${episodeNum}`, "i"),
-        new RegExp(`0?${seasonNum}x0?${episodeNum}`, "i"),
-        new RegExp(`Season\\s*${seasonNum}\\D+Episode\\s*${episodeNum}`, "i"),
-      ];
-      availableStreams = availableStreams.filter((stream) =>
-        patterns.some((p) => p.test(stream.title))
-      );
-    }
-
-    availableStreams = availableStreams.filter(
-      (s) => !/x265|h265|hevc/i.test(s.title)
-    );
-
-    availableStreams.sort((a, b) => {
-      const aIsMp4 = a.title.toLowerCase().includes(".mp4");
-      const bIsMp4 = b.title.toLowerCase().includes(".mp4");
-      return aIsMp4 === bIsMp4 ? 0 : aIsMp4 ? -1 : 1;
+async function streamHandler(req, res) {
+  const { magnet } = req.query;
+  if (!magnet) {
+    return res.status(400).json({
+      success: false,
+      message: "Magnet link obrigatório na query (?magnet=...)",
     });
-
-    const stream = availableStreams[0];
-    if (!stream) {
-      throw new Error("Nenhum stream compatível (MP4/H.264) encontrado.");
-    }
-
-    console.log(`[SETUP] [${cacheKey}] Stream selecionado: ${stream.title}`);
-
-    const magnetURI = `magnet:?xt=urn:btih:${
-      stream.infoHash
-    }&dn=${encodeURIComponent(stream.title)}`;
+  }
+  try {
+    // 1. Adicionar magnet ao Real-Debrid
     const { data: addedMagnetData } = await axios.post(
       "https://api.real-debrid.com/rest/1.0/torrents/addMagnet",
-      `magnet=${encodeURIComponent(magnetURI)}`,
+      `magnet=${encodeURIComponent(magnet)}`,
       {
         headers: {
           Authorization: `Bearer ${REAL_DEBRID_TOKEN}`,
@@ -78,69 +27,67 @@ async function setupStreamHandler(req, res) {
         },
       }
     );
-
     const torrentId = addedMagnetData.id;
-
-    const pollTorrentInfo = async () => {
-      for (let attempts = 0; attempts < 25; attempts++) {
-        await new Promise((r) => setTimeout(r, 5000));
-        const { data: torrentInfo } = await axios.get(
-          `https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`,
-          { headers: { Authorization: `Bearer ${REAL_DEBRID_TOKEN}` } }
-        );
-
-        console.log(
-          `[SETUP] [${cacheKey}] Tentativa ${attempts + 1}: Status - ${
-            torrentInfo.status
-          }`
-        );
-
-        if (
-          torrentInfo.status === "downloaded" &&
-          torrentInfo.links?.length > 0
-        ) {
-          return torrentInfo;
-        } else if (torrentInfo.status === "waiting_files_selection") {
-          const mp4Files = torrentInfo.files
-            .filter((f) => /\.mp4$/i.test(f.path) && f.bytes > 10_000_000)
-            .sort((a, b) => b.bytes - a.bytes);
-
-          if (mp4Files.length > 0) {
-            await axios.post(
-              `https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`,
-              `files=${mp4Files[0].id}`,
-              {
-                headers: {
-                  Authorization: `Bearer ${REAL_DEBRID_TOKEN}`,
-                  "Content-Type": "application/x-www-form-urlencoded",
-                },
-              }
-            );
-          } else {
-            await axios.delete(
-              `https://api.real-debrid.com/rest/1.0/torrents/delete/${torrentId}`,
-              { headers: { Authorization: `Bearer ${REAL_DEBRID_TOKEN}` } }
-            );
-            throw new Error("Nenhum ficheiro MP4 válido encontrado.");
-          }
-        } else if (
-          ["magnet_error", "error", "dead"].includes(torrentInfo.status)
-        ) {
-          throw new Error(
-            `Erro no torrent RD: ${torrentInfo.error || torrentInfo.status}`
+    // 2. Poll até estar pronto
+    let torrentInfo;
+    for (let attempts = 0; attempts < 25; attempts++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const { data: info } = await axios.get(
+        `https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`,
+        { headers: { Authorization: `Bearer ${REAL_DEBRID_TOKEN}` } }
+      );
+      torrentInfo = info;
+      if (
+        torrentInfo.status === "downloaded" &&
+        torrentInfo.links?.length > 0
+      ) {
+        break;
+      } else if (torrentInfo.status === "waiting_files_selection") {
+        const mp4Files = (torrentInfo.files || [])
+          .filter((f) => /\.mp4$/i.test(f.path) && f.bytes > 10_000_000)
+          .sort((a, b) => b.bytes - a.bytes);
+        if (mp4Files.length > 0) {
+          await axios.post(
+            `https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`,
+            `files=${mp4Files.map((f) => f.id).join(",")}`,
+            {
+              headers: {
+                Authorization: `Bearer ${REAL_DEBRID_TOKEN}`,
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+            }
           );
+        } else {
+          await axios.delete(
+            `https://api.real-debrid.com/rest/1.0/torrents/delete/${torrentId}`,
+            { headers: { Authorization: `Bearer ${REAL_DEBRID_TOKEN}` } }
+          );
+          return res.status(404).json({
+            success: false,
+            message: "Nenhum ficheiro MP4 válido encontrado.",
+          });
         }
+      } else if (
+        ["magnet_error", "error", "dead"].includes(torrentInfo.status)
+      ) {
+        return res.status(500).json({
+          success: false,
+          message: `Erro no torrent RD: ${
+            torrentInfo.error || torrentInfo.status
+          }`,
+        });
       }
-
-      throw new Error("Timeout no Real-Debrid.");
-    };
-
-    const torrentInfo = await pollTorrentInfo();
-    const downloadableLink = torrentInfo.links[0];
-
+    }
+    if (!torrentInfo.links || !torrentInfo.links[0]) {
+      return res.status(404).json({
+        success: false,
+        message: "Nenhum link disponível no Real-Debrid.",
+      });
+    }
+    // 3. Unrestrict link para obter link direto
     const { data: unrestrictedData } = await axios.post(
       "https://api.real-debrid.com/rest/1.0/unrestrict/link",
-      `link=${downloadableLink}`,
+      `link=${torrentInfo.links[0]}`,
       {
         headers: {
           Authorization: `Bearer ${REAL_DEBRID_TOKEN}`,
@@ -148,19 +95,16 @@ async function setupStreamHandler(req, res) {
         },
       }
     );
-
-    streamUrlCache.set(cacheKey, unrestrictedData.download);
-    setTimeout(() => streamUrlCache.delete(cacheKey), 3600 * 1000);
-
-    console.log(`[SETUP] Link para ${cacheKey} preparado e guardado na cache.`);
-    res.json({ success: true, streamPath: `/stream/${cacheKey}` });
+    const finalStreamUrl = unrestrictedData.download;
+    // 4. Retorne apenas o link direto ao invés de fazer proxy
+    return res.json({ success: true, url: finalStreamUrl });
   } catch (error) {
     const message = error.response
       ? JSON.stringify(error.response.data)
       : error.message;
-    console.error(`[SETUP] Erro ao preparar stream para ${imdbId}:`, message);
-    res.status(500).json({ success: false, message: `Erro: ${message}` });
+    console.error("[STREAM] Erro ao preparar link:", message);
+    res.status(500).send("Erro ao preparar o link do vídeo.");
   }
 }
 
-module.exports = { setupStreamHandler };
+module.exports = { streamHandler };
