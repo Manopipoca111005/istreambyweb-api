@@ -1,3 +1,4 @@
+/** @type {import("eslint").Linter.Config} */
 module.exports = {
   root: true,
   env: {
@@ -10,7 +11,7 @@ module.exports = {
   },
   rules: {
     indent: ["error", 2],
-    "linebreak-style": ["error", "unix"],
+    "linebreak-style": ["error", "unix"], // força LF
     quotes: ["error", "double"],
     semi: ["error", "always"],
     "no-unused-vars": ["warn"],

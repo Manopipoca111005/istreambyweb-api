@@ -28,6 +28,7 @@ async function streamHandler(req, res) {
       }
     );
     const torrentId = addedMagnetData.id;
+
     // 2. Poll até estar pronto
     let torrentInfo;
     for (let attempts = 0; attempts < 25; attempts++) {
@@ -37,19 +38,19 @@ async function streamHandler(req, res) {
         { headers: { Authorization: `Bearer ${REAL_DEBRID_TOKEN}` } }
       );
       torrentInfo = info;
+
       if (
         torrentInfo.status === "downloaded" &&
         torrentInfo.links?.length > 0
       ) {
         break;
       } else if (torrentInfo.status === "waiting_files_selection") {
-        const mp4Files = (torrentInfo.files || [])
-          .filter((f) => /\.mp4$/i.test(f.path) && f.bytes > 10_000_000)
-          .sort((a, b) => b.bytes - a.bytes);
-        if (mp4Files.length > 0) {
+        const allFiles = torrentInfo.files || [];
+
+        if (allFiles.length > 0) {
           await axios.post(
             `https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`,
-            `files=${mp4Files.map((f) => f.id).join(",")}`,
+            `files=${allFiles.map((f) => f.id).join(",")}`,
             {
               headers: {
                 Authorization: `Bearer ${REAL_DEBRID_TOKEN}`,
@@ -64,7 +65,7 @@ async function streamHandler(req, res) {
           );
           return res.status(404).json({
             success: false,
-            message: "Nenhum ficheiro MP4 válido encontrado.",
+            message: "Nenhum ficheiro disponível no torrent.",
           });
         }
       } else if (
@@ -78,12 +79,14 @@ async function streamHandler(req, res) {
         });
       }
     }
+
     if (!torrentInfo.links || !torrentInfo.links[0]) {
       return res.status(404).json({
         success: false,
         message: "Nenhum link disponível no Real-Debrid.",
       });
     }
+
     // 3. Unrestrict link para obter link direto
     const { data: unrestrictedData } = await axios.post(
       "https://api.real-debrid.com/rest/1.0/unrestrict/link",
@@ -96,6 +99,7 @@ async function streamHandler(req, res) {
       }
     );
     const finalStreamUrl = unrestrictedData.download;
+
     // 4. Retorne apenas o link direto ao invés de fazer proxy
     return res.json({ success: true, url: finalStreamUrl });
   } catch (error) {
