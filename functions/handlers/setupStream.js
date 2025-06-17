@@ -10,10 +10,6 @@ let VIDEO_EXTENSIONS = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm"];
  * Endpoint: /api/stream?magnet=...
  */
 async function streamHandler(req, res) {
-  const userAgent = req.get("user-agent") || req.headers["user-agent"];
-  if (userAgent && userAgent.includes("Safari")) {
-    VIDEO_EXTENSIONS = ["mp4"];
-  }
   const { magnet } = req.query;
   if (!magnet) {
     return res.status(400).json({
