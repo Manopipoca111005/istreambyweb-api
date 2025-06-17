@@ -1,28 +1,26 @@
 const express = require("express");
 const { onRequest } = require("firebase-functions/v2/https");
-const { streamHandler } = require("./handlers/setupStream"); // Verifique o caminho correto
+const { streamHandler } = require("./handlers/setupStream");
 const cors = require("cors");
-// Importe ambos os handlers de subtitles
-const { searchSubtitlesHandler, downloadSubtitleHandler, proxySubtitleHandler } = require("./handlers/subtitles");
+const { searchSubtitlesHandler, getVttSubtitleHandler } = require("./handlers/subtitles");
+const { proxyVideoHandler, proxyImageHandler } = require("./handlers/proxy"); // <- Importante: Confirme este caminho!
 
 const app = express();
-app.use(cors());
-app.use(express.json()); // Adicione este middleware para parsear o body de requisições JSON
+app.use(cors()); // Permite CORS de qualquer origem
+app.use(express.json());
 
+// Rotas existentes
 app.get("/stream", streamHandler);
-app.get("/subtitles/search", searchSubtitlesHandler); // Mudei para /subtitles/search para clareza
-app.post("/subtitles/download", downloadSubtitleHandler); // Nova rota para baixar legendas
-// Se você ainda usa o proxy, adicione a rota para ele também
-app.get("/subtitles/proxy", proxySubtitleHandler); // Verifique se proxySubtitleHandler também é exportado de subtitles.js e importado
+app.get("/subtitles/search", searchSubtitlesHandler);
+app.get("/subtitles/vtt", getVttSubtitleHandler);
 
-/**
- * @function api
- * @description Express app exposto como função HTTPS do Firebase.
- */
+// Novas rotas usando o handler de proxy
+app.get("/proxy/video", proxyVideoHandler);
+app.get("/proxy/image", proxyImageHandler);
+
 exports.api = onRequest(
   {
-    region: "us-central1",
-    // memory: "1GiB",
+    region: "us-central1", // Confirme que esta região corresponde à sua implantação
   },
   app
 );

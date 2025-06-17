@@ -1,207 +1,159 @@
 const axios = require("axios");
 
-const OPENSUBTITLES_API_KEY = "yqcGsK2wFddmZnrECKlaUY1nAweVpKZA"; // Sua nova chave de API
+const OPENSUBTITLES_API_KEY = "h2UaLQaDuh6wwDv4SQcAiQ8bDj7U2yJf";
 const OPENSUBTITLES_BASE_URL = "https://api.opensubtitles.com/api/v1";
 
-/**
- * Handler para pesquisar legendas por IMDB ID
- */
+function convertSrtToVtt(srtContent) {
+  let vttContent = "WEBVTT\n\n";
+  const srtBlocks = srtContent.split(/\r?\n\r?\n/).filter(Boolean);
+
+  for (const block of srtBlocks) {
+    const lines = block.split(/\r?\n/).filter(Boolean);
+    if (lines.length >= 2) {
+      let timeLineIndex = 0;
+
+      if (/^\d+$/.test(lines[0])) {
+        timeLineIndex = 1;
+      }
+
+      const timeLine = lines[timeLineIndex].replace(/,/g, ".");
+      const textLines = lines.slice(timeLineIndex + 1);
+
+      vttContent += `${timeLine}\n${textLines.join("\n")}\n\n`;
+    }
+  }
+
+  return vttContent;
+}
+
 async function searchSubtitlesHandler(req, res) {
   const { imdbId, languages = "pt,en", type = "movie", season, episode } = req.query;
-  
   if (!imdbId) {
     return res.status(400).json({
       success: false,
       message: "IMDB ID é obrigatório na query (?imdbId=...)",
     });
   }
-
-  // Verifica se a chave de API padrão está sendo usada (sua chave agora não é a padrão)
   if (OPENSUBTITLES_API_KEY === "glsBXGzZgcUHR6lwx4yhzteH6dUAmKbU") {
     return res.status(500).json({
       success: false,
       message: "Chave da API do OpenSubtitles não configurada no backend. Por favor, adicione a sua chave.",
     });
   }
-
   try {
     console.log(`[SUBTITLES] Pesquisando legendas para IMDB ID: ${imdbId}, idiomas: ${languages}`);
-    
     const searchParams = new URLSearchParams({
       imdb_id: imdbId,
       languages: languages,
     });
-
     if (type === "series" && season && episode) {
       searchParams.append("season_number", season);
       searchParams.append("episode_number", episode);
     }
-    
-    const response = await axios.get(
-      `${OPENSUBTITLES_BASE_URL}/subtitles?${searchParams.toString()}`,
-      {
-        headers: {
-          "Api-Key": OPENSUBTITLES_API_KEY,
-          "User-Agent": "iStreamByWeb v1.0", // Certifique-se de que este User-Agent seja aceito
-          "Accept": "application/json",
-        },
-      }
-    );
-    console.log(`[SUBTITLES] Resposta recebida: ${JSON.stringify(response.data)}`);
-    const subtitles = response.data.data || [];
-    
-    // Filtrar e formatar as legendas para o frontend
-    const formattedSubtitles = subtitles.map(subtitle => ({
-      id: subtitle.id,
-      file_id: subtitle.attributes.files[0]?.file_id,
-      language: subtitle.attributes.language,
-      release: subtitle.attributes.release,
-      download_count: subtitle.attributes.download_count,
-      hearing_impaired: subtitle.attributes.hearing_impaired,
-      hd: subtitle.attributes.hd,
-      fps: subtitle.attributes.fps,
-      votes: subtitle.attributes.votes,
-      points: subtitle.attributes.points,
-      ratings: subtitle.attributes.ratings,
-      from_trusted: subtitle.attributes.from_trusted,
-      foreign_parts_only: subtitle.attributes.foreign_parts_only,
-      ai_translated: subtitle.attributes.ai_translated,
-      machine_translated: subtitle.attributes.machine_translated,
-      upload_date: subtitle.attributes.upload_date,
-      url: subtitle.attributes.url,
-    })).filter(subtitle => subtitle.file_id);
-
-    console.log(`[SUBTITLES] Encontradas ${formattedSubtitles.length} legendas`);
-
-    return res.json({
-      success: true,
-      count: formattedSubtitles.length,
-      subtitles: formattedSubtitles,
-      mock_data: false,
+    const response = await axios.get(`${OPENSUBTITLES_BASE_URL}/subtitles`, {
+      headers: {
+        "Api-Key": OPENSUBTITLES_API_KEY,
+        "User-Agent": "iStreamByWeb v1.0",
+      },
+      params: searchParams,
     });
-
+    const subtitles = response.data.data.map((sub) => ({
+      file_id: sub.attributes.files[0].file_id,
+      language: sub.attributes.language,
+      release: sub.attributes.release || "Desconhecido",
+    }));
+    res.status(200).json({ success: true, subtitles });
   } catch (error) {
     const message = error.response
       ? JSON.stringify(error.response.data)
       : error.message;
-    console.error("[SUBTITLES] Erro ao pesquisar legendas:", message);
-    res.status(500).json({
-      success: false,
-      message: `Erro ao pesquisar legendas: ${message}`,
-    });
+    console.error("[SUBTITLES] Erro na pesquisa:", message);
+    res.status(500).json({ success: false, message: `Erro na pesquisa: ${message}` });
   }
 }
 
-/**
- * Handler para obter URL de download de legenda
- */
-async function downloadSubtitleHandler(req, res) {
-  const { file_id } = req.body;
-  
-  if (!file_id) {
-    return res.status(400).json({
-      success: false,
-      message: "file_id é obrigatório no body da requisição",
-    });
-  }
-
-  // Verifica se a chave de API padrão está sendo usada (sua chave agora não é a padrão)
-  if (OPENSUBTITLES_API_KEY === "glsBXGzZgcUHR6lwx4yhzteH6dUAmKbU") {
-    return res.status(500).json({
-      success: false,
-      message: "Chave da API do OpenSubtitles não configurada no backend. Por favor, adicione a sua chave.",
-    });
-  }
-
+async function downloadSubtitle(file_id) {
   try {
-    console.log(`[SUBTITLES] Solicitando download para file_id: ${file_id}`);
-    
-    const response = await axios.post(
-      `${OPENSUBTITLES_BASE_URL}/download`,
-      { file_id: parseInt(file_id) },
-      {
-        headers: {
-          "Api-Key": OPENSUBTITLES_API_KEY,
-          "User-Agent": "iStreamByWeb v1.0", // Certifique-se de que este User-Agent seja aceito
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-      }
-    );
+    console.log(`[SUBTITLES] Obtendo URL de download para file_id: ${file_id}`);
+    let headersList = {
+      "Accept": "*/*",
+      "User-Agent": "iStreamByWeb v1.0",
+      "Api-Key": OPENSUBTITLES_API_KEY,
+      "Content-Type": "application/json" 
+    };
 
-    const downloadData = response.data;
-    
-    if (downloadData.link) {
-      console.log(`[SUBTITLES] URL de download obtido para file_id: ${file_id}`);
-      return res.json({
-        success: true,
-        download_url: downloadData.link,
-        file_name: downloadData.file_name,
-        requests: downloadData.requests,
-        remaining: downloadData.remaining,
-        reset_time: downloadData.reset_time,
-      });
-    } else {
-      throw new Error("URL de download não disponível na resposta");
-    }
+    let bodyContent = JSON.stringify({
+      "file_id": file_id
+    });
 
+    let reqOptions = {
+      url: `${OPENSUBTITLES_BASE_URL}/download`,
+      method: "POST",
+      headers: headersList,
+      data: bodyContent,
+    };
+
+    let response = await axios.request(reqOptions);
+
+
+    return response.data.link;
   } catch (error) {
+
     const message = error.response
       ? JSON.stringify(error.response.data)
       : error.message;
     console.error("[SUBTITLES] Erro ao obter URL de download:", message);
-    res.status(500).json({
-      success: false,
-      message: `Erro ao obter URL de download: ${message}`,
-    });
+    return null;
   }
 }
 
-/**
- * Handler para fazer proxy do download da legenda
- */
-async function proxySubtitleHandler(req, res) {
-  const { url } = req.query;
-  
-  if (!url) {
+async function getVttSubtitleHandler(req, res) {
+  const { fileId } = req.query;
+  console.log(`[SUBTITLES] Requisição para obter legenda VTT para file_id: ${fileId}`);
+  if (!fileId) {
     return res.status(400).json({
       success: false,
-      message: "URL é obrigatório na query (?url=...)",
+      message: "fileId é obrigatório na query (?fileId=...)",
     });
   }
-
   try {
-    console.log(`[SUBTITLES] Fazendo proxy de download: ${url}`);
-    
-    const response = await axios.get(url, {
-      responseType: "stream",
+    const downloadUrl = await downloadSubtitle(fileId);
+    if (!downloadUrl) {
+      return res.status(500).json({
+        success: false,
+        message: `Não foi possível obter a URL de download para o file_id ${fileId}.`,
+      });
+    }
+
+    console.log(`[SUBTITLES] URL de download obtida: ${downloadUrl}`);
+    console.log(`[SUBTITLES] Fazendo download e convertendo para VTT para file_id: ${fileId} from ${downloadUrl}`);
+
+    const srtResponse = await axios.get(downloadUrl, {
+      responseType: "text",
       headers: {
-        "User-Agent": "iStreamByWeb v1.0", // Certifique-se de que este User-Agent seja aceito
+        "User-Agent": "iStreamByWeb v1.0",
       },
     });
 
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Content-Disposition", "attachment; filename=\"subtitle.srt\"");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-    response.data.pipe(res);
-
+    const srtContent = srtResponse.data;
+    const vttContent = convertSrtToVtt(srtContent);
+    res.setHeader("Content-Type", "text/vtt; charset=utf-8"); // Mantenha esta linha
+    // Remova as linhas abaixo
+    // res.setHeader("Access-Control-Allow-Origin", "*");
+    // res.setHeader("Access-Control-Allow-Methods", "GET");
+    // res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.status(200).send(vttContent);
   } catch (error) {
+    console.error(`[SUBTITLES] Erro ao obter legenda VTT para file_id ${fileId}:`, error);
     const message = error.response
       ? JSON.stringify(error.response.data)
       : error.message;
-    console.error("[SUBTITLES] Erro no proxy de download:", message);
-    res.status(500).json({
-      success: false,
-      message: `Erro no proxy de download: ${message}`,
-    });
+    console.error(`[SUBTITLES] Erro no download/conversão VTT para file_id ${fileId}:`, message);
+    res.status(500).json({ success: false, message: `Erro ao processar legenda VTT: ${message}` });
   }
 }
 
 module.exports = {
   searchSubtitlesHandler,
-  downloadSubtitleHandler,
-  proxySubtitleHandler,
+  getVttSubtitleHandler,
 };

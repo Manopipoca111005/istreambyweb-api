@@ -67,12 +67,7 @@ async function streamHandler(req, res) {
           )
         );
       }
-      if (torrentInfo.links) {
-        console.log(
-          "  Links gerados pelo Real-Debrid:",
-          JSON.stringify(torrentInfo.links, null, 2)
-        );
-      }
+      
       // FIM DOS LOGS DE DEPURACÃO
 
       if (
