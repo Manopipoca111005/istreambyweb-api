@@ -22,7 +22,6 @@ app.get("/subtitles/proxy", proxySubtitleHandler); // Verifique se proxySubtitle
 exports.api = onRequest(
   {
     region: "us-central1",
-    timeoutSeconds: 300,
     // memory: "1GiB",
   },
   app
