@@ -250,9 +250,12 @@ Desenvolvi uma **API proxy de streaming** completa com as seguintes funcionalida
 
 This project is open source and available under the [MIT License](LICENSE).
 
-## 👤 Author
+## 👨‍💻 Autor
 
-**Gustavo Ramos** - [Manopipoca111005](https://github.com/Manopipoca111005)
+**Gustavo Ramos**
+- GitHub: [@Manopipoca111005](https://github.com/Manopipoca111005)
+- Linkdin: [Gustavo Ramos](www.linkedin.com/in/gustavo-ramos-637580265)
+- Discord: [883392891161026560](https://discordapp.com/users/883392891161026560)
 
 ---
 
